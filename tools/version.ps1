@@ -82,7 +82,10 @@ $version.GetEnumerator() | %{
   $type = $_.Value.GetType()
   $value = $_.Value
   $fmtValue = switch ($type) {
-    ([string]) {"`"$value`""}
+    ([string]) {
+      # RESOURCE_BASE_VERSION must be bare "W, W, W" for the RC FILEVERSION statement.
+      if ($value -match '^\d+(?:,\s*\d+)+$') { $value } else { "`"$value`"" }
+    }
     ([int]) {$value.ToString()}
     ([bool]) {([int]$value).ToString()}
     ([object[]]) {$value -join ', '}
