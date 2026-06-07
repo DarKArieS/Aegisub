@@ -449,6 +449,21 @@ void Advanced_Whisper(wxTreebook *book, Preferences *parent) {
 	auto whisper = p->PageSizer(_("Whisper Speech Recognition"));
 	p->OptionAdd(whisper, _("Model file path (.bin)"), "Path/Whisper/Model");
 
+	const wxString impl_arr[] = { "GPU", "Hybrid", "Reference" };
+	wxArrayString impl_choices(3, impl_arr);
+	p->OptionChoice(whisper, _("Model Implementation"), impl_choices, "Whisper/Implementation");
+
+	const wxString lang_arr[] = {
+		"Auto detect",
+		"Arabic (ar)", "Chinese (zh)", "Dutch (nl)", "English (en)",
+		"French (fr)", "German (de)", "Hindi (hi)", "Indonesian (id)",
+		"Italian (it)", "Japanese (ja)", "Korean (ko)", "Polish (pl)",
+		"Portuguese (pt)", "Russian (ru)", "Spanish (es)", "Thai (th)",
+		"Turkish (tr)", "Ukrainian (uk)", "Vietnamese (vi)",
+	};
+	wxArrayString lang_choices(20, lang_arr);
+	p->OptionChoice(whisper, _("Language"), lang_choices, "Whisper/Language");
+
 	p->SetSizerAndFit(p->sizer);
 }
 

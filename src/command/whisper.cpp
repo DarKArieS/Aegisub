@@ -84,7 +84,35 @@ static HRESULT __cdecl on_new_segment(Whisper::iContext *, uint32_t, void *pv) n
 	return static_cast<agi::ProgressSink *>(pv)->IsCancelled() ? S_FALSE : S_OK;
 }
 
+static HRESULT __stdcall on_stream_progress(double val, Whisper::iContext *, void *pv) noexcept {
+	auto *ps = static_cast<agi::ProgressSink *>(pv);
+	ps->SetProgress((int64_t)(val * 100), 100);
+	return ps->IsCancelled() ? S_FALSE : S_OK;
+}
+
 struct Segment { int start_ms, end_ms; std::string text; };
+
+// Convert a "Name (xx)" language preference string to the uint32_t key
+// that sFullParams.language expects.  Returns UINT_MAX for "Auto detect".
+static uint32_t parse_language(const std::string &s) {
+	if (s.empty() || s == "Auto detect") return ~0u;
+	// Extract the ISO 639-1 code from "Name (xx)" format.
+	auto lp = s.rfind('(');
+	auto rp = s.rfind(')');
+	const char *code = (lp != std::string::npos && rp > lp + 1)
+	                 ? s.c_str() + lp + 1
+	                 : s.c_str();  // fallback: treat whole string as code
+	uint32_t key = 0;
+	for (int i = 0; code[i] && code[i] != ')' && i < 4; ++i)
+		key |= (uint32_t)(uint8_t)code[i] << (i * 8);
+	return key;
+}
+
+static Whisper::eModelImplementation parse_impl(const std::string &s) {
+	if (s == "Hybrid")    return Whisper::eModelImplementation::Hybrid;
+	if (s == "Reference") return Whisper::eModelImplementation::Reference;
+	return Whisper::eModelImplementation::GPU;
+}
 
 // WhisperDesktop's COM objects carry thread affinity: every method call
 // (including Release) must come from the same thread that created the object.
@@ -92,14 +120,16 @@ struct Segment { int start_ms, end_ms; std::string text; };
 // exclusive owner of all Whisper COM resources.
 class WhisperWorker {
 	// COM resources — created, used, and destroyed exclusively on thr.
+	// iAudioReader is NOT cached: openAudioFile seeks to start_ms on each call,
+	// so creating it fresh per transcription is cheap and avoids holding a
+	// large decoded PCM buffer in RAM between calls.
 	HMODULE                          hdll        = nullptr;
 	Whisper::pfn_initMediaFoundation pfnInitMF   = nullptr;
 	Whisper::pfn_loadModel           pfnLoadModel = nullptr;
 	Whisper::iMediaFoundation       *mf          = nullptr;
 	Whisper::iModel                 *model       = nullptr;
-	Whisper::iAudioBuffer           *audio       = nullptr;
 	std::wstring                     model_path;
-	std::wstring                     audio_path;
+	Whisper::eModelImplementation    model_impl  = Whisper::eModelImplementation::GPU;
 
 	// Dispatch queue (capacity = 1; callers must wait for completion).
 	std::mutex              mtx;
@@ -128,14 +158,13 @@ class WhisperWorker {
 	}
 
 	void release_impl() {
-		if (audio) { audio->Release(); audio = nullptr; }
 		if (model) { model->Release(); model = nullptr; }
 		if (mf)    { mf->Release();    mf    = nullptr; }
 		pfnInitMF    = nullptr;
 		pfnLoadModel = nullptr;
 		if (hdll)  { FreeLibrary(hdll); hdll = nullptr; }
 		model_path.clear();
-		audio_path.clear();
+		model_impl = Whisper::eModelImplementation::GPU;
 		loaded.store(false, std::memory_order_release);
 	}
 
@@ -170,6 +199,7 @@ public:
 	// Called from inside a dispatch() lambda (on the worker thread).
 	void transcribe(const std::wstring &model_wpath, const std::wstring &audio_wpath,
 	                int start_ms, int duration_ms,
+	                Whisper::eModelImplementation desired_impl, uint32_t language,
 	                agi::ProgressSink *ps,
 	                std::string &error_msg, std::vector<Segment> &segments)
 	{
@@ -196,24 +226,13 @@ public:
 
 		if (ps->IsCancelled()) return;
 
-		if (!audio || audio_path != audio_wpath) {
-			if (audio) { audio->Release(); audio = nullptr; }
-			ps->SetMessage("Loading audio...");
-			ps->SetIndeterminate();
-			HRESULT hr = mf->loadAudioFile(audio_wpath.c_str(), /*stereo=*/false, &audio);
-			if (FAILED(hr)) { error_msg = "Failed to load audio file into Whisper."; return; }
-			audio_path = audio_wpath;
-		}
-
-		if (ps->IsCancelled()) return;
-
-		if (!model || model_path != model_wpath) {
+		if (!model || model_path != model_wpath || model_impl != desired_impl) {
 			if (model) { model->Release(); model = nullptr; }
 			ps->SetMessage("Loading model...");
 			ps->SetProgress(0, 100);
 
 			Whisper::sModelSetup setup{};
-			setup.impl = Whisper::eModelImplementation::GPU;
+			setup.impl = desired_impl;
 
 			Whisper::sLoadModelCallbacks load_cbs{};
 			load_cbs.pv       = ps;
@@ -228,41 +247,66 @@ public:
 				return;
 			}
 			model_path = model_wpath;
+			model_impl = desired_impl;
 		}
 
 		loaded.store(true, std::memory_order_release);
 
 		if (ps->IsCancelled()) return;
 
+		// Open a streaming reader seeking directly to start_ms — avoids
+		// decoding the entire audio file into RAM (unlike loadAudioFile).
+		ComPtr<Whisper::iAudioReader> reader;
+		{
+			HRESULT hr = mf->openAudioFile(audio_wpath.c_str(), /*stereo=*/false, &reader.p, start_ms);
+			if (FAILED(hr)) { error_msg = "Failed to open audio file for streaming."; return; }
+		}
+
+		if (ps->IsCancelled()) return;
+
 		ComPtr<Whisper::iContext> ctx;
-		HRESULT hr = model->createContext(&ctx.p);
-		if (FAILED(hr)) { error_msg = "Failed to create inference context."; return; }
+		{
+			HRESULT hr = model->createContext(&ctx.p);
+			if (FAILED(hr)) { error_msg = "Failed to create inference context."; return; }
+		}
 
 		Whisper::sFullParams params{};
-		hr = ctx->fullDefaultParams(Whisper::eSamplingStrategy::Greedy, &params);
-		if (FAILED(hr)) { error_msg = "Failed to retrieve default inference parameters."; return; }
+		{
+			HRESULT hr = ctx->fullDefaultParams(Whisper::eSamplingStrategy::Greedy, &params);
+			if (FAILED(hr)) { error_msg = "Failed to retrieve default inference parameters."; return; }
+		}
 
-		// Limit transcription to the selected lines' time range.
-		params.offset_ms   = start_ms;
-		params.duration_ms = duration_ms;
+		// offset_ms tells the model the absolute timestamp of the reader's
+		// start position (for correct output timestamps); duration_ms caps
+		// how much audio runStreamed will consume from the reader.
+		params.offset_ms                      = start_ms;
+		params.duration_ms                    = duration_ms;
+		params.language                       = language;
 		params.new_segment_callback           = on_new_segment;
 		params.new_segment_callback_user_data = ps;
 
 		ps->SetMessage("Transcribing...");
-		ps->SetIndeterminate();
+		ps->SetProgress(0, 100);
 
-		hr = ctx->runFull(params, audio);
-		if (FAILED(hr)) {
-			if (!ps->IsCancelled())
-				error_msg = "Transcription failed.";
-			return;
+		// runStreamed feeds audio from the reader to the GPU in chunks,
+		// overlapping decode and inference (pipeline parallelism).
+		Whisper::sProgressSink progress_sink{ on_stream_progress, ps };
+		{
+			HRESULT hr = ctx->runStreamed(params, progress_sink, reader.p);
+			if (FAILED(hr)) {
+				if (!ps->IsCancelled())
+					error_msg = "Transcription failed.";
+				return;
+			}
 		}
 
 		ComPtr<Whisper::iTranscribeResult> result;
-		hr = ctx->getResults(
-			Whisper::eResultFlags::Timestamps | Whisper::eResultFlags::NewObject,
-			&result.p);
-		if (FAILED(hr)) { error_msg = "Failed to retrieve transcription results."; return; }
+		{
+			HRESULT hr = ctx->getResults(
+				Whisper::eResultFlags::Timestamps | Whisper::eResultFlags::NewObject,
+				&result.p);
+			if (FAILED(hr)) { error_msg = "Failed to retrieve transcription results."; return; }
+		}
 
 		Whisper::sTranscribeLength len{};
 		result->getSize(len);
@@ -348,6 +392,11 @@ struct subtitle_whisper_transcribe final : public Command {
 		std::wstring model_wpath = agi::fs::path(model_path_str).wstring();
 		std::wstring audio_wpath = audio_path.wstring();
 
+		Whisper::eModelImplementation desired_impl =
+			parse_impl(OPT_GET("Whisper/Implementation")->GetString());
+		uint32_t language =
+			parse_language(OPT_GET("Whisper/Language")->GetString());
+
 		std::vector<Segment> segments;
 		std::string          error_msg;
 
@@ -362,7 +411,7 @@ struct subtitle_whisper_transcribe final : public Command {
 			ps->SetTitle("Whisper Speech Recognition");
 			w.dispatch([&]{
 				w.transcribe(model_wpath, audio_wpath, start_ms, duration_ms,
-				             ps, error_msg, segments);
+				             desired_impl, language, ps, error_msg, segments);
 			});
 		});
 

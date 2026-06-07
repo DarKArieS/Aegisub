@@ -196,6 +196,12 @@ struct iAudioBuffer : IUnknown {
 	virtual HRESULT      __stdcall getTime(int64_t &rdi) const = 0;
 };
 
+struct iAudioReader : IUnknown {
+	virtual HRESULT __stdcall getDuration(int64_t &rdi) const = 0;
+	virtual HRESULT __stdcall getReader(void **pp) const = 0;   // IMFSourceReader** — void** avoids MF header dependency
+	virtual HRESULT __stdcall requestedStereo() const = 0;
+};
+
 struct iContext : IUnknown {
 	virtual HRESULT __stdcall runFull(const sFullParams &params, const iAudioBuffer *buffer) = 0;
 	virtual HRESULT __stdcall runStreamed(const sFullParams &params, const sProgressSink &progress, const iAudioReader *reader) = 0;
