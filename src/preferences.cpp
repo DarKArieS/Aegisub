@@ -442,6 +442,16 @@ void Advanced_Audio(wxTreebook *book, Preferences *parent) {
 	p->SetSizerAndFit(p->sizer);
 }
 
+/// Whisper speech-recognition preferences subpage (Windows only)
+void Advanced_Whisper(wxTreebook *book, Preferences *parent) {
+	auto p = new OptionPage(book, parent, _("Whisper"), OptionPage::PAGE_SUB);
+
+	auto whisper = p->PageSizer(_("Whisper Speech Recognition"));
+	p->OptionAdd(whisper, _("Model file path (.bin)"), "Path/Whisper/Model");
+
+	p->SetSizerAndFit(p->sizer);
+}
+
 /// Advanced Video preferences subpage
 void Advanced_Video(wxTreebook *book, Preferences *parent) {
 	auto p = new OptionPage(book, parent, _("Video"), OptionPage::PAGE_SUB);
@@ -738,6 +748,7 @@ Preferences::Preferences(wxWindow *parent): wxDialog(parent, -1, _("Preferences"
 	Advanced(book, this);
 	Advanced_Audio(book, this);
 	Advanced_Video(book, this);
+	Advanced_Whisper(book, this);
 
 	book->Fit();
 

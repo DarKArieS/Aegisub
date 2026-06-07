@@ -312,7 +312,10 @@
 			"Timecodes" : "",
 			"Video" : ""
 		},
-		"Screenshot" : "?video"
+		"Screenshot" : "?video",
+		"Whisper" : {
+			"Model" : ""
+		}
 	},
 
 

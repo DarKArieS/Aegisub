@@ -89,6 +89,7 @@ void init_timecode();
 void init_tool();
 void init_video();
 void init_visual_tools();
+void init_whisper();
 
 void init_builtin_commands() {
 	LOG_D("command/init") << "Populating command map";
@@ -106,6 +107,7 @@ void init_builtin_commands() {
 	init_tool();
 	init_video();
 	init_visual_tools();
+	init_whisper();
 }
 
 void clear() {
