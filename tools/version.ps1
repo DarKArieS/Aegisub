@@ -49,7 +49,7 @@ $gitHash = git -C $repositoryRootPath rev-parse --short HEAD 2>$null
 $gitVersionString = $gitRevision, $gitBranch, $gitHash -join '-'
 $exactGitTag = git -C $repositoryRootPath describe --exact-match --tags 2>$null
 
-if ($gitVersionString -eq $version['BUILD_GIT_VERSION_STRING']) {
+if ($gitVersionString -eq $version['BUILD_GIT_VERSION_STRING'] -and $version.ContainsKey('RESOURCE_BASE_VERSION')) {
   exit 0
 }
 
@@ -67,6 +67,12 @@ if ($exactGitTag -match $semVerMatch) {
       break;
     }
   }
+}
+
+if (-not $version.ContainsKey('RESOURCE_BASE_VERSION')) {
+  $version['TAGGED_RELEASE'] = $false
+  $version['RESOURCE_BASE_VERSION'] = @(3, 4, 1)
+  $version['INSTALLER_VERSION'] = '3.4.1'
 }
 
 $version['BUILD_GIT_VERSION_NUMBER'] = $gitRevision
