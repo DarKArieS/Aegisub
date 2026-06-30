@@ -23,6 +23,7 @@
 #include "libaegisub/util.h"
 
 #include <array>
+#include <cmath>
 #include <span>
 #include <type_traits>
 #include <utility>
@@ -35,9 +36,25 @@ void AudioProvider::GetAudioWithVolume(void *buf, int64_t start, int64_t count, 
 	if (bytes_per_sample != 2)
 		throw agi::InternalError("GetAudioWithVolume called on unconverted audio stream");
 
+	// Soft-knee limiter: samples below the threshold are amplified linearly so
+	// normal-level audio stays transparent, while peaks that would exceed full
+	// scale are smoothly compressed toward ±1 instead of being hard-clipped.
+	// This lets volume > 1.0 actually sound louder without the harsh distortion
+	// of clipped peaks. Attenuation (volume < 1.0) rarely reaches the threshold,
+	// so it stays linear.
+	constexpr double threshold = 0.8; // limiting starts at ~-1.9 dBFS
+
 	auto buffer = static_cast<int16_t *>(buf);
-	for (size_t i = 0; i < (size_t)count; ++i)
-		buffer[i] = util::mid(-0x8000, static_cast<int>(buffer[i] * volume + 0.5), 0x7FFF);
+	for (size_t i = 0; i < (size_t)count; ++i) {
+		double sample = buffer[i] / 32768.0 * volume;
+		double mag = std::abs(sample);
+		if (mag > threshold) {
+			double over = (mag - threshold) / (1.0 - threshold);
+			mag = threshold + (1.0 - threshold) * std::tanh(over);
+			sample = std::copysign(mag, sample);
+		}
+		buffer[i] = util::mid(-0x8000, static_cast<int>(sample * 32768.0 + 0.5), 0x7FFF);
+	}
 }
 
 void AudioProvider::ZeroFill(void *buf, int64_t count) const {

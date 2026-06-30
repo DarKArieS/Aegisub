@@ -185,28 +185,27 @@ void AudioBox::OnVerticalZoom(wxScrollEvent &event) {
 	audioDisplay->SetAmplitudeScale(value);
 	if (!VolumeBar->IsEnabled()) {
 		VolumeBar->SetValue(pos);
-		controller->SetVolume(value);
+		controller->SetVolume(pow(pos / 50.0, 5));
 	}
 }
 
 void AudioBox::OnVolume(wxScrollEvent &event) {
 	int pos = mid(1, event.GetPosition(), 100);
 	OPT_SET("Audio/Volume")->SetInt(pos);
-	controller->SetVolume(pow(pos / 50.0, 3));
+	controller->SetVolume(pow(pos / 50.0, 5));
 }
 
 void AudioBox::OnVerticalLink(agi::OptionValue const& opt) {
 	if (opt.GetBool()) {
 		int pos = mid(1, VerticalZoom->GetValue(), 100);
-		double value = pow(pos / 50.0, 3);
-		controller->SetVolume(value);
+		controller->SetVolume(pow(pos / 50.0, 5));
 		VolumeBar->SetValue(pos);
 	}
 	VolumeBar->Enable(!opt.GetBool());
 }
 
 void AudioBox::OnAudioOpen() {
-	controller->SetVolume(pow(mid(1, VolumeBar->GetValue(), 100) / 50.0, 3));
+	controller->SetVolume(pow(mid(1, VolumeBar->GetValue(), 100) / 50.0, 5));
 }
 
 void AudioBox::ShowKaraokeBar(bool show) {
