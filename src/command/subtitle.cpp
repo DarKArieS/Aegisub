@@ -33,6 +33,7 @@
 
 #include "../ass_dialogue.h"
 #include "../ass_file.h"
+#include "../compare_grid.h"
 #include "../compat.h"
 #include "../dialog_search_replace.h"
 #include "../dialogs.h"
@@ -277,6 +278,35 @@ struct subtitle_open final : public Command {
 	}
 };
 
+struct subtitle_compare_open final : public Command {
+	CMD_NAME("subtitle/compare/open")
+	STR_MENU("Open Co&mparison Subtitles...")
+	STR_DISP("Open Comparison Subtitles")
+	STR_HELP("Open a second subtitles file read-only and show it beside the grid, aligned by time")
+
+	void operator()(agi::Context *c) override {
+		auto filename = OpenFileSelector(_("Open Comparison Subtitles File"), "Path/Last/Subtitles", "","", SubtitleFormat::GetWildcards(0), c->parent);
+		if (!filename.empty())
+			c->compareGrid->Load(filename);
+	}
+};
+
+struct subtitle_compare_close final : public Command {
+	CMD_NAME("subtitle/compare/close")
+	STR_MENU("Close Comparison Subtitles")
+	STR_DISP("Close Comparison Subtitles")
+	STR_HELP("Close the comparison subtitles pane")
+	CMD_TYPE(COMMAND_VALIDATE)
+
+	void operator()(agi::Context *c) override {
+		c->compareGrid->Close();
+	}
+
+	bool Validate(const agi::Context *c) override {
+		return c->compareGrid && c->compareGrid->IsLoaded();
+	}
+};
+
 struct subtitle_open_autosave final : public Command {
 	CMD_NAME("subtitle/open/autosave")
 	STR_MENU("Open A&utosaved Subtitles...")
@@ -460,6 +490,8 @@ namespace cmd {
 		reg(std::make_unique<subtitle_insert_before_videotime>());
 		reg(std::make_unique<subtitle_new>());
 		reg(std::make_unique<subtitle_close>());
+		reg(std::make_unique<subtitle_compare_close>());
+		reg(std::make_unique<subtitle_compare_open>());
 		reg(std::make_unique<subtitle_open>());
 		reg(std::make_unique<subtitle_open_autosave>());
 		reg(std::make_unique<subtitle_open_charset>());

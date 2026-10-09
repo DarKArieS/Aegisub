@@ -45,6 +45,7 @@
 #include "base_grid.h"
 #include "compat.h"
 #include "command/command.h"
+#include "compare_grid.h"
 #include "dialog_detached_video.h"
 #include "dialog_manager.h"
 #include "libresrc/libresrc.h"
@@ -65,6 +66,7 @@
 #include <wx/dnd.h>
 #include <wx/msgdlg.h>
 #include <wx/sizer.h>
+#include <wx/splitter.h>
 #include <wx/statline.h>
 #include <wx/sysopt.h>
 #include <wx/toolbar.h>
@@ -188,7 +190,12 @@ void FrameMain::InitContents() {
 	auto Panel = new wxPanel(this, -1, wxDefaultPosition, wxDefaultSize, wxTAB_TRAVERSAL | wxCLIP_CHILDREN);
 
 	StartupLog("Create subtitles grid");
-	context->subsGrid = new BaseGrid(Panel, context.get());
+	auto gridSplitter = new wxSplitterWindow(Panel, -1, wxDefaultPosition, wxDefaultSize, wxSP_LIVE_UPDATE | wxSP_3DSASH);
+	gridSplitter->SetSashGravity(0.5);
+	gridSplitter->SetMinimumPaneSize(FromDIP(80));
+	context->subsGrid = new BaseGrid(gridSplitter, context.get());
+	context->compareGrid = new CompareGrid(gridSplitter, context.get());
+	gridSplitter->Initialize(context->subsGrid);
 
 	StartupLog("Create video box");
 	videoBox = new VideoBox(Panel, false, context.get());
@@ -209,7 +216,7 @@ void FrameMain::InitContents() {
 	MainSizer = new wxBoxSizer(wxVERTICAL);
 	MainSizer->Add(new wxStaticLine(Panel),0,wxEXPAND | wxALL,0);
 	MainSizer->Add(TopSizer,0,wxEXPAND | wxALL,0);
-	MainSizer->Add(context->subsGrid,1,wxEXPAND | wxALL,0);
+	MainSizer->Add(gridSplitter,1,wxEXPAND | wxALL,0);
 	Panel->SetSizer(MainSizer);
 
 	StartupLog("Perform layout");

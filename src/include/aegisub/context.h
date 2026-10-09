@@ -29,6 +29,7 @@ class InitialLineState;
 class SelectionController;
 class SubsController;
 class BaseGrid;
+class CompareGrid;
 class TextSelectionController;
 class VideoController;
 class VideoDisplay;
@@ -62,6 +63,7 @@ struct Context {
 	AudioBox *audioBox = nullptr;
 	AudioKaraoke *karaoke = nullptr;
 	BaseGrid *subsGrid = nullptr;
+	CompareGrid *compareGrid = nullptr;
 	std::unique_ptr<DialogManager> dialog;
 	FrameMain *frame = nullptr;
 	VideoDisplay *videoDisplay = nullptr;

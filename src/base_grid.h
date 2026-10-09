@@ -126,12 +126,22 @@ class BaseGrid final : public wxWindow {
 	/// @return Subtitle dialogue line for index, or 0 if invalid index
 	AssDialogue *GetDialogue(int n) const;
 
+	/// Fired whenever the grid repaints, so that companion views (such as the
+	/// comparison pane) can stay vertically aligned with it
+	agi::signal::Signal<> AnnounceRepaint;
+
 public:
 	BaseGrid(wxWindow* parent, agi::Context *context);
 	~BaseGrid();
 
 	void SetByFrame(bool state);
 	void ScrollTo(int y);
+
+	int GetFirstVisibleRow() const { return yPos; }
+	int GetLineHeight() const { return lineHeight; }
+	wxFont const& GetGridFont() const { return font; }
+
+	DEFINE_SIGNAL_ADDERS(AnnounceRepaint, AddRepaintListener)
 
 	DECLARE_EVENT_TABLE()
 };

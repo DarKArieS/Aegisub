@@ -272,6 +272,8 @@ void BaseGrid::OnSeek() {
 }
 
 void BaseGrid::OnPaint(wxPaintEvent &) {
+	AnnounceRepaint();
+
 	// Find which columns need to be repainted
 	std::vector<char> paint_columns;
 	paint_columns.resize(columns.size(), false);

@@ -17,6 +17,8 @@
         { "command" : "subtitle/open/charset" },
         { "command" : "subtitle/open/video" },
         { "command" : "subtitle/open/autosave" },
+        { "command" : "subtitle/compare/open" },
+        { "command" : "subtitle/compare/close" },
         { "recent" : "Subtitle", "text" : "Open Recent" },
         {},
         { "command" : "subtitle/close" },
