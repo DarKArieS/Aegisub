@@ -778,7 +778,7 @@ static void combine_karaoke(AssDialogue *first, AssDialogue *second) {
 
 static void combine_concat(AssDialogue *first, AssDialogue *second) {
 	if (second)
-		first->Text = agi::Str(first->Text.get(), " ", second->Text.get());
+		first->Text = agi::Str(first->Text.get(), second->Text.get());
 }
 
 static void combine_drop(AssDialogue *, AssDialogue *) { }
