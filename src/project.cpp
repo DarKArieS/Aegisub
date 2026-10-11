@@ -23,6 +23,7 @@
 #include "audio_provider_factory.h"
 #include "base_grid.h"
 #include "charset_detect.h"
+#include "compare_grid.h"
 #include "compat.h"
 #include "dialog_progress.h"
 #include "dialogs.h"
@@ -419,7 +420,7 @@ void Project::CloseKeyframes() {
 	AnnounceKeyframesModified(keyframes);
 }
 
-void Project::LoadList(std::vector<agi::fs::path> const& files) {
+void Project::LoadList(std::vector<agi::fs::path> const& files, bool subs_as_comparison) {
 	// Keep these lists sorted
 
 	// Video formats
@@ -517,6 +518,11 @@ void Project::LoadList(std::vector<agi::fs::path> const& files) {
 			video = file;
 		if (audio.empty() && search(std::begin(audioList), std::end(audioList), ext))
 			audio = file;
+	}
+
+	if (!subs.empty() && subs_as_comparison && context->compareGrid && context->subsController->HasFilename()) {
+		context->compareGrid->Load(subs);
+		subs.clear();
 	}
 
 	ProjectProperties properties;

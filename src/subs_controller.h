@@ -90,6 +90,9 @@ public:
 	/// The file's path and filename if any, or platform-appropriate "untitled"
 	agi::fs::path Filename() const;
 
+	/// Is the open file backed by a file on disk (i.e. not a new, untitled file)?
+	bool HasFilename() const { return !filename.empty(); }
+
 	/// Does the file have unsaved changes?
 	bool IsModified() const { return commit_id != saved_commit_id; };
 

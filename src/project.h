@@ -92,7 +92,11 @@ public:
 	bool CanCloseKeyframes() const { return !keyframes_file.empty(); }
 	std::vector<int> const& Keyframes() const { return keyframes; }
 
-	void LoadList(std::vector<agi::fs::path> const& files);
+	/// Load a mixed list of subtitles, video, audio, timecodes and keyframes
+	/// @param subs_as_comparison If a subtitles file is already open, open the
+	///                           subtitles in the list as comparison subtitles
+	///                           instead of replacing the current file
+	void LoadList(std::vector<agi::fs::path> const& files, bool subs_as_comparison = false);
 
 	DEFINE_SIGNAL_ADDERS(AnnounceAudioProviderModified, AddAudioProviderListener)
 	DEFINE_SIGNAL_ADDERS(AnnounceVideoProviderModified, AddVideoProviderListener)

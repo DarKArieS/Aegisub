@@ -70,6 +70,7 @@
 #include <wx/statline.h>
 #include <wx/sysopt.h>
 #include <wx/toolbar.h>
+#include <wx/utils.h>
 
 enum {
 	ID_APP_TIMER_STATUSCLEAR = 12002
@@ -90,7 +91,10 @@ public:
 		std::vector<agi::fs::path> files;
 		for (wxString const& fn : filenames)
 			files.push_back(from_wx(fn));
-		agi::dispatch::Main().Async([=, this] { context->project->LoadList(files); });
+		// Dropping subtitles onto an already-open file opens them for
+		// comparison; hold shift to replace the open file instead
+		bool as_comparison = !wxGetKeyState(WXK_SHIFT);
+		agi::dispatch::Main().Async([=, this] { context->project->LoadList(files, as_comparison); });
 		return true;
 	}
 };
