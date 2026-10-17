@@ -71,6 +71,8 @@ class BaseGrid final : public wxWindow {
 
 	std::vector<std::unique_ptr<GridColumn>> columns;
 	std::vector<bool> columns_visible;
+	/// Option which stores which columns are visible
+	std::string column_option = "Subtitle/Grid/Column";
 
 	std::vector<wxRect> text_refresh_rects;
 
@@ -136,6 +138,10 @@ public:
 
 	void SetByFrame(bool state);
 	void ScrollTo(int y);
+
+	/// Load column visibility from, and save changes to, the given option
+	void SetColumnOption(std::string const& option_name);
+	bool IsByFrame() const { return byFrame; }
 
 	int GetFirstVisibleRow() const { return yPos; }
 	int GetLineHeight() const { return lineHeight; }

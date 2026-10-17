@@ -143,6 +143,23 @@ struct SubsController::UndoInfo {
 	}
 };
 
+struct SubsController::Document {
+	AssFile file;
+	agi::fs::path filename;
+	boost::container::list<UndoInfo> undo_stack;
+	boost::container::list<UndoInfo> redo_stack;
+	int commit_id = 0;
+	int saved_commit_id = 0;
+	int autosaved_commit_id = 0;
+	/// Has this file never been the active file? If so it has no undo history
+	/// yet, and its initial state is pushed when it is first made active
+	bool fresh = true;
+
+	/// Selection to restore when this file becomes active again
+	std::vector<int> selection;
+	int active_line_id = -1;
+};
+
 SubsController::SubsController(agi::Context *context)
 : context(context)
 , undo_connection(context->ass->AddUndoManager(&SubsController::OnCommit, this))
@@ -222,6 +239,108 @@ void SubsController::Save(agi::fs::path const& filename, const char *encoding) {
 	}
 
 	SetFileName(filename);
+}
+
+void SubsController::LoadSecondary(agi::fs::path const& filename, const char *charset) {
+	auto doc = std::make_unique<Document>();
+	SubtitleFormat::GetReader(filename, charset)->ReadFile(&doc->file, filename, context->project->Timecodes(), charset);
+	doc->filename = filename;
+	int row = 0;
+	for (auto& line : doc->file.Events)
+		line.Row = row++;
+	secondary = std::move(doc);
+	SecondaryChanged(false);
+}
+
+void SubsController::CloseSecondary() {
+	if (!secondary) return;
+	secondary.reset();
+	SecondaryChanged(false);
+}
+
+const AssFile *SubsController::SecondaryFile() const {
+	return secondary ? &secondary->file : nullptr;
+}
+
+agi::fs::path SubsController::SecondaryFilename() const {
+	if (!secondary) return {};
+	if (!secondary->filename.empty()) return secondary->filename;
+	return from_wx(_("Untitled"));
+}
+
+bool SubsController::IsSecondaryModified() const {
+	return secondary && secondary->commit_id != secondary->saved_commit_id;
+}
+
+void SubsController::SwapSecondary() {
+	if (!secondary) return;
+	Document& doc = *secondary;
+
+	// Remember the selection of the file being put aside
+	std::vector<int> selection;
+	for (auto line : context->selectionController->GetSelectedSet())
+		selection.push_back(line->Id);
+	auto active = context->selectionController->GetActiveLine();
+	int active_line_id = active ? active->Id : -1;
+
+	// The old file's lines stay alive in doc.file, so anything which still
+	// holds pointers to them during the commit below remains valid
+	context->ass->swap(doc.file);
+	std::swap(filename, doc.filename);
+	undo_stack.swap(doc.undo_stack);
+	redo_stack.swap(doc.redo_stack);
+	std::swap(commit_id, doc.commit_id);
+	std::swap(saved_commit_id, doc.saved_commit_id);
+	std::swap(autosaved_commit_id, doc.autosaved_commit_id);
+	std::swap(selection, doc.selection);
+	std::swap(active_line_id, doc.active_line_id);
+	const bool fresh = doc.fresh;
+	doc.fresh = false;
+
+	// Skip a commit ID so that commits amending one made in the other file
+	// can't be coalesced into this file's undo history
+	++next_commit_id;
+
+	context->path->SetToken("?script", filename.parent_path());
+	context->ass->Commit("", AssFile::COMMIT_NEW);
+	if (fresh)
+		autosaved_commit_id = saved_commit_id = commit_id;
+
+	sort(begin(selection), end(selection));
+	Selection new_sel;
+	AssDialogue *new_active = nullptr;
+	for (auto& line : context->ass->Events) {
+		if (line.Id == active_line_id)
+			new_active = &line;
+		if (binary_search(begin(selection), end(selection), line.Id))
+			new_sel.insert(&line);
+	}
+	if (!new_active && !context->ass->Events.empty())
+		new_active = &context->ass->Events.front();
+	if (new_sel.empty() && new_active)
+		new_sel.insert(new_active);
+	context->selectionController->SetSelectionAndActive(std::move(new_sel), new_active);
+
+	FileOpen(filename);
+	SecondaryChanged(true);
+}
+
+int SubsController::TryToCloseSecondary(bool allow_cancel) {
+	if (!IsSecondaryModified())
+		return wxYES;
+
+	int flags = wxYES_NO;
+	if (allow_cancel)
+		flags |= wxCANCEL;
+	int result = wxMessageBox(fmt_tl("Do you want to save changes to %s?", SecondaryFilename()), _("Unsaved changes"), flags, context->parent);
+	if (result == wxYES) {
+		SwapSecondary();
+		cmd::call("subtitle/save", context);
+		bool failed = IsModified();
+		SwapSecondary();
+		return failed ? wxCANCEL : wxYES;
+	}
+	return result;
 }
 
 void SubsController::Close() {

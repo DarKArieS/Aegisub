@@ -219,6 +219,7 @@
 			"CPS Error" : "rgb(255,0,0)",
 			"Header" : "rgb(165, 207, 231)",
 			"Left Column" : "rgb(196, 236, 201)",
+			"Left Column Inactive" : "rgb(255, 196, 120)",
 			"Lines" : "rgb(190,190,190)",
 			"Selection" : "rgb(0,0,0)",
 			"Standard" : "rgb(0,0,0)"
@@ -392,6 +393,10 @@
 			"Column" : [
 				{"bool" : true}
 			],
+			"Column Right" : [
+				{"bool" : true}
+			],
+			"Compare Split" : 0.5,
 			"Focus Allow" : true,
 			"Font Face" : "",
 			"Font Size" : 9,

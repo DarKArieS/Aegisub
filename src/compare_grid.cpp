@@ -24,14 +24,13 @@
 #include "ass_file.h"
 #include "base_grid.h"
 #include "charset_detect.h"
+#include "command/command.h"
 #include "compat.h"
 #include "format.h"
 #include "options.h"
-#include "project.h"
 #include "selection_controller.h"
-#include "subtitle_format.h"
+#include "subs_controller.h"
 #include "utils.h"
-#include "video_controller.h"
 
 #include <libaegisub/exception.h>
 
@@ -45,25 +44,16 @@
 #include <wx/splitter.h>
 
 namespace {
-wxString display_text(AssDialogue const& d) {
-	int mode = OPT_GET("Subtitle/Grid/Hide Overrides")->GetInt();
-	if (mode == 0) return to_wx(d.Text);
-
-	wxString replace_char = to_wx(OPT_GET("Subtitle/Grid/Hide Overrides Char")->GetString());
-	auto const& text = d.Text.get();
-	wxString str;
-	size_t start = 0, pos;
-	while ((pos = text.find('{', start)) != std::string::npos) {
-		str += to_wx(text.substr(start, pos - start));
-		if (mode == 1)
-			str += replace_char;
-		start = text.find('}', pos);
-		if (start != std::string::npos) ++start;
-	}
-	if (start != std::string::npos)
-		str += to_wx(text.substr(start));
-	return str;
+const char *column_option(bool left) {
+	return left ? "Subtitle/Grid/Column" : "Subtitle/Grid/Column Right";
 }
+
+// Indices into GetGridColumns()
+const size_t COL_START = 2;
+const size_t COL_END = 3;
+
+// Check menu.h for id range allocation before editing this enum
+const int MENU_SHOW_COL = (wxID_HIGHEST + 1) + 2100; // Needs 15 IDs after this
 }
 
 CompareGrid::CompareGrid(wxWindow *parent, agi::Context *c)
@@ -73,38 +63,124 @@ CompareGrid::CompareGrid(wxWindow *parent, agi::Context *c)
 {
 	SetBackgroundStyle(wxBG_STYLE_PAINT);
 	Hide();
+	ApplyColumnOption();
 
 	connections = agi::signal::make_vector({
 		c->ass->AddCommitListener(&CompareGrid::OnCommit, this),
+		c->subsController->AddSecondaryChangedListener(&CompareGrid::OnSecondaryChanged, this),
+		c->subsController->AddFileSaveListener([this] { Refresh(false); }),
 		grid->AddRepaintListener(&CompareGrid::OnGridRepaint, this),
 	});
 
 	Bind(wxEVT_PAINT, &CompareGrid::OnPaint, this);
 	Bind(wxEVT_SIZE, [this](wxSizeEvent &) { Refresh(false); });
 	Bind(wxEVT_LEFT_DOWN, &CompareGrid::OnMouse, this);
-	Bind(wxEVT_LEFT_DCLICK, &CompareGrid::OnMouse, this);
 	Bind(wxEVT_MOUSEWHEEL, &CompareGrid::OnMouse, this);
-	Bind(wxEVT_CONTEXT_MENU, [this](wxContextMenuEvent &) {
-		wxMenu menu;
+	Bind(wxEVT_CONTEXT_MENU, &CompareGrid::OnContextMenu, this);
+
+	// Remember where the user puts the boundary between the two files
+	if (auto splitter = dynamic_cast<wxSplitterWindow *>(parent)) {
+		splitter->Bind(wxEVT_SPLITTER_SASH_POS_CHANGED, [splitter](wxSplitterEvent &evt) {
+			int width = splitter->GetClientSize().GetWidth();
+			if (width > 0)
+				OPT_SET("Subtitle/Grid/Compare Split")->SetDouble((double)evt.GetSashPosition() / width);
+			evt.Skip();
+		});
+	}
+}
+
+void CompareGrid::OnContextMenu(wxContextMenuEvent &evt) {
+	wxPoint pos = evt.GetPosition();
+	bool on_header = pos != wxDefaultPosition && ScreenToClient(pos).y <= grid->GetLineHeight();
+
+	wxMenu menu;
+	if (on_header) {
+		// Same column chooser as the main grid, stored separately for each side
+		for (size_t i = 0; i < columns.size(); ++i) {
+			if (columns[i]->CanHide())
+				menu.Append(MENU_SHOW_COL + i, columns[i]->Description(), "", wxITEM_CHECK)->Check(columns[i]->Visible());
+		}
+		menu.Bind(wxEVT_MENU, [this](wxCommandEvent &e) {
+			size_t item = e.GetId() - MENU_SHOW_COL;
+			auto option = column_option(!active_on_left);
+			auto visible = OPT_GET(option)->GetListBool();
+			visible.resize(columns.size(), true);
+			visible[item] = !visible[item];
+			OPT_SET(option)->SetListBool(visible);
+			ApplyColumnOption();
+		}, MENU_SHOW_COL, MENU_SHOW_COL + 15);
+	}
+	else {
+		menu.Append(wxID_EDIT, _("&Edit This File"));
+		menu.Append(wxID_APPLY, _("Apply These &Times to the Selected Lines"))
+			->Enable(!c->selectionController->GetSelectedSet().empty());
+		menu.AppendSeparator();
 		menu.Append(wxID_CLOSE, _("&Close Comparison Subtitles"));
+		menu.Bind(wxEVT_MENU, [this](wxCommandEvent &) { Activate(); }, wxID_EDIT);
+		menu.Bind(wxEVT_MENU, [this](wxCommandEvent &) { cmd::call("subtitle/compare/sync_time", c); }, wxID_APPLY);
 		menu.Bind(wxEVT_MENU, [this](wxCommandEvent &) { Close(); }, wxID_CLOSE);
-		PopupMenu(&menu);
-	});
+	}
+	PopupMenu(&menu);
+}
+
+void CompareGrid::ApplyColumnOption() {
+	auto visible = OPT_GET(column_option(!active_on_left))->GetListBool();
+	for (size_t i = 0; i < columns.size(); ++i)
+		columns[i]->SetVisible(i >= visible.size() || visible[i]);
+	widths_dirty = true;
+	Refresh(false);
+}
+
+void CompareGrid::SetColumnWidths() {
+	widths_dirty = false;
+	width_font = grid->GetGridFont();
+	auto file = c->subsController->SecondaryFile();
+	if (!file) return;
+
+	wxClientDC dc(this);
+	dc.SetFont(width_font);
+	if (!width_helper)
+		width_helper = std::make_unique<WidthHelper>();
+	width_helper->SetDC(&dc);
+	for (auto& column : columns)
+		column->UpdateWidth(c, *file, *width_helper);
+	width_helper->Age();
 }
 
 CompareGrid::~CompareGrid() { }
 
+bool CompareGrid::IsLoaded() const {
+	return c->subsController->HasSecondary();
+}
+
+bool CompareGrid::GetMatchedTimes(const AssDialogue *line, int &start, int &end) {
+	if (!IsLoaded()) return false;
+	if (maps_dirty) UpdateMaps();
+
+	size_t row = line->Row;
+	if (row >= rows.size() || rows[row] != line || row_refs[row].empty())
+		return false;
+
+	start = std::numeric_limits<int>::max();
+	end = std::numeric_limits<int>::min();
+	for (auto const& r : row_refs[row]) {
+		start = std::min<int>(start, r.line->Start);
+		end = std::max<int>(end, r.line->End);
+	}
+	return true;
+}
+
 bool CompareGrid::Load(agi::fs::path const& path) {
+	if (c->subsController->TryToCloseSecondary() == wxCANCEL)
+		return false;
+
 	auto show_error = [&](wxString const& message) {
 		wxMessageBox(message, _("Error loading file"), wxOK | wxICON_ERROR | wxCENTER, c->parent);
 	};
 
 	try {
 		std::string encoding = CharSetDetect::GetEncoding(path);
-		auto reader = SubtitleFormat::GetReader(path, encoding.c_str());
-		auto file = std::make_unique<AssFile>();
-		reader->ReadFile(file.get(), path, c->project->Timecodes(), encoding.c_str());
-		ref = std::move(file);
+		c->subsController->LoadSecondary(path, encoding.c_str());
 	}
 	catch (agi::UserCancelException const&) { return false; }
 	catch (agi::fs::FileNotFound const&) {
@@ -119,34 +195,93 @@ bool CompareGrid::Load(agi::fs::path const& path) {
 		show_error(to_wx(e.what()));
 		return false;
 	}
-
-	filename = path;
-	maps_dirty = true;
-	SetShown(true);
-	Refresh(false);
 	return true;
 }
 
-void CompareGrid::Close() {
-	ref.reset();
-	filename.clear();
-	row_refs.clear();
-	maps_dirty = true;
-	SetShown(false);
+bool CompareGrid::Close() {
+	if (c->subsController->TryToCloseSecondary() == wxCANCEL)
+		return false;
+	c->subsController->CloseSecondary();
+	return true;
 }
 
-void CompareGrid::SetShown(bool show) {
+void CompareGrid::OnSecondaryChanged(bool swapped) {
+	maps_dirty = true;
+	widths_dirty = true;
+	// Each file stays on its own side, so the main grid moves to whichever
+	// side the newly active file is on
+	if (swapped)
+		active_on_left = !active_on_left;
+	if (!IsLoaded())
+		active_on_left = true;
+	UpdateLayout();
+	Refresh(false);
+}
+
+void CompareGrid::UpdateLayout() {
 	auto splitter = dynamic_cast<wxSplitterWindow *>(GetParent());
 	if (!splitter) {
-		Show(show);
+		Show(IsLoaded());
 		GetParent()->Layout();
 		return;
 	}
 
-	if (show && !splitter->IsSplit())
-		splitter->SplitVertically(grid, this, splitter->GetClientSize().GetWidth() / 2);
-	else if (!show && splitter->IsSplit())
-		splitter->Unsplit(this);
+	// Each side of the window has its own set of visible columns, which
+	// follows whichever pane is currently on that side
+	grid->SetColumnOption(column_option(active_on_left));
+	ApplyColumnOption();
+
+	if (!IsLoaded()) {
+		if (splitter->IsSplit())
+			splitter->Unsplit(this);
+		return;
+	}
+
+	wxWindow *left = active_on_left ? static_cast<wxWindow *>(grid) : this;
+	wxWindow *right = active_on_left ? static_cast<wxWindow *>(this) : grid;
+	if (splitter->IsSplit() && splitter->GetWindow1() == left)
+		return;
+
+	int sash = (int)(splitter->GetClientSize().GetWidth() * OPT_GET("Subtitle/Grid/Compare Split")->GetDouble());
+	splitter->Freeze();
+	if (splitter->IsSplit()) {
+		// Keep the boundary where it was on screen even though the panes swap
+		sash = splitter->GetSashPosition();
+		splitter->Unsplit();
+	}
+	splitter->SplitVertically(left, right, sash);
+	splitter->Thaw();
+}
+
+void CompareGrid::Activate(int row) {
+	if (!IsLoaded()) return;
+	if (maps_dirty) UpdateMaps();
+
+	// Line in this pane that should become the active line, and the screen
+	// row it should stay on so that the view doesn't jump
+	int line_id = -1;
+	int screen_row = 0;
+	if (row >= 0 && row < (int)row_refs.size() && !row_refs[row].empty()) {
+		line_id = row_refs[row].front().line->Id;
+		screen_row = row - grid->GetFirstVisibleRow();
+	}
+
+	// The grid overwrites the file's stored scroll position when it refreshes
+	// after the swap, so grab it first
+	const int scroll_position = c->subsController->SecondaryFile()->Properties.scroll_position;
+	c->subsController->SwapSecondary();
+
+	if (line_id < 0) {
+		grid->ScrollTo(scroll_position);
+		return;
+	}
+	for (auto& line : c->ass->Events) {
+		if (line.Id == line_id) {
+			c->selectionController->SetSelectionAndActive({&line}, &line);
+			grid->ScrollTo(line.Row - screen_row);
+			break;
+		}
+	}
 }
 
 void CompareGrid::OnCommit(int type) {
@@ -169,6 +304,7 @@ void CompareGrid::UpdateMaps() {
 	for (auto& line : c->ass->Events)
 		rows.push_back(&line);
 	row_refs.resize(rows.size());
+	auto ref = c->subsController->SecondaryFile();
 	if (!ref || rows.empty()) return;
 
 	// Main rows sorted by start time, so that only the rows which can
@@ -182,9 +318,7 @@ void CompareGrid::UpdateMaps() {
 	for (auto line : rows)
 		max_duration = std::max<int>(max_duration, line->End - line->Start);
 
-	int number = 0;
 	for (auto const& r : ref->Events) {
-		++number;
 		if (r.Comment) continue;
 		const int rs = r.Start, re = r.End;
 
@@ -236,12 +370,20 @@ void CompareGrid::UpdateMaps() {
 		}
 
 		if (best != std::numeric_limits<size_t>::max())
-			row_refs[best].push_back({&r, number, best_overlaps});
+			row_refs[best].push_back({&r, best_overlaps});
 	}
 }
 
 void CompareGrid::OnPaint(wxPaintEvent &) {
 	if (maps_dirty) UpdateMaps();
+	if (by_frame != grid->IsByFrame()) {
+		by_frame = grid->IsByFrame();
+		for (auto& column : columns)
+			column->SetByFrame(by_frame);
+		widths_dirty = true;
+	}
+	if (widths_dirty || width_font != grid->GetGridFont())
+		SetColumnWidths();
 
 	wxAutoBufferedPaintDC dc(this);
 	int w, h;
@@ -256,7 +398,8 @@ void CompareGrid::OnPaint(wxPaintEvent &) {
 	wxBrush bg_selection(to_wx(OPT_GET("Colour/Subtitle Grid/Background/Selection")->GetColor()));
 	wxBrush bg_comment(to_wx(OPT_GET("Colour/Subtitle Grid/Background/Comment")->GetColor()));
 	wxBrush bg_sel_comment(to_wx(OPT_GET("Colour/Subtitle Grid/Background/Selected Comment")->GetColor()));
-	wxBrush bg_left(to_wx(OPT_GET("Colour/Subtitle Grid/Left Column")->GetColor()));
+	// The line number column marks this pane as the file not being edited
+	wxBrush bg_left(to_wx(OPT_GET("Colour/Subtitle Grid/Left Column Inactive")->GetColor()));
 	wxColour text_standard(to_wx(OPT_GET("Colour/Subtitle Grid/Standard")->GetColor()));
 	wxColour text_selection(to_wx(OPT_GET("Colour/Subtitle Grid/Selection")->GetColor()));
 	wxColour text_diff(to_wx(OPT_GET("Colour/Subtitle Grid/Collision")->GetColor()));
@@ -272,25 +415,26 @@ void CompareGrid::OnPaint(wxPaintEvent &) {
 	dc.SetBackground(bg_default);
 	dc.Clear();
 
-	const int num_w = dc.GetTextExtent(wxS("00000+")).GetWidth() + 8;
-	const int time_w = dc.GetTextExtent(wxS("0:00:00.00")).GetWidth() + 8;
-	const int col_x[] = {0, num_w, num_w + time_w, num_w + time_w * 2};
-
-	auto draw_cell = [&](wxString const& str, int col, int y) {
-		dc.DrawText(str, col_x[col] + 4, y + 2);
-	};
-
-	// Header
+	// Header, laid out the same way as the main grid's
 	dc.SetPen(*wxTRANSPARENT_PEN);
 	dc.SetBrush(bg_left);
-	dc.DrawRectangle(0, line_height, num_w, h - line_height);
+	dc.DrawRectangle(0, line_height, columns[0]->Width(), h - line_height);
 	dc.SetBrush(bg_header);
 	dc.DrawRectangle(0, 0, w, line_height);
 	dc.SetTextForeground(text_standard);
-	draw_cell(wxS("#"), 0, 0);
-	draw_cell(_("Start"), 1, 0);
-	draw_cell(_("End"), 2, 0);
-	draw_cell(_("Reference: ") + filename.filename().wstring(), 3, 0);
+	{
+		int x = 0;
+		for (auto const& column : columns) {
+			if (column->Width()) {
+				wxString const& str = column->Header();
+				int left = x + 4;
+				if (column->Centered())
+					left += (column->Width() - 6 - dc.GetTextExtent(str).GetWidth()) / 2;
+				dc.DrawText(str, left, 2);
+			}
+			x += column->Width();
+		}
+	}
 
 	dc.SetPen(grid_pen);
 	dc.DrawLine(0, 0, w, 0);
@@ -300,6 +444,7 @@ void CompareGrid::OnPaint(wxPaintEvent &) {
 	const int n_draw = mid(0, rows_on_screen, (int)rows.size() - y_pos);
 	auto const& selection = c->selectionController->GetSelectedSet();
 	const auto active_line = c->selectionController->GetActiveLine();
+	const int grid_x = columns[0]->Width();
 
 	for (int i = 0; i < n_draw; ++i) {
 		const int row = y_pos + i;
@@ -308,45 +453,50 @@ void CompareGrid::OnPaint(wxPaintEvent &) {
 
 		// Mirror the main grid's row colours so rows are easy to match up
 		bool in_sel = !!selection.count(main_line);
-		wxBrush const* brush = nullptr;
-		if (in_sel && main_line->Comment) brush = &bg_sel_comment;
-		else if (in_sel) brush = &bg_selection;
-		else if (main_line->Comment) brush = &bg_comment;
-		if (brush) {
+		wxBrush row_brush = bg_default;
+		if (in_sel && main_line->Comment) row_brush = bg_sel_comment;
+		else if (in_sel) row_brush = bg_selection;
+		else if (main_line->Comment) row_brush = bg_comment;
+		dc.SetBrush(row_brush);
+		if (row_brush != bg_default) {
 			dc.SetPen(*wxTRANSPARENT_PEN);
-			dc.SetBrush(*brush);
-			dc.DrawRectangle(num_w, y + 1, w, line_height);
+			dc.DrawRectangle(grid_x, y + 1, w, line_height);
 		}
 
 		auto const& refs = row_refs[row];
 		if (!refs.empty()) {
-			int start = std::numeric_limits<int>::max(), end = 0;
+			// Several reference lines attached to one row are shown as a
+			// single line spanning all of them
+			const AssDialogue *line = refs.front().line;
+			std::unique_ptr<AssDialogue> merged;
 			bool any_overlap = false;
-			wxString text;
-			for (auto const& r : refs) {
-				start = std::min<int>(start, r.line->Start);
-				end = std::max<int>(end, r.line->End);
+			for (auto const& r : refs)
 				any_overlap |= r.overlaps;
-				if (!text.empty()) text += wxS(" / ");
-				text += display_text(*r.line);
+			if (refs.size() > 1) {
+				merged = std::make_unique<AssDialogue>(*line);
+				merged->Row = line->Row;
+				std::string text;
+				for (auto const& r : refs) {
+					merged->Start = std::min<int>(merged->Start, r.line->Start);
+					merged->End = std::max<int>(merged->End, r.line->End);
+					if (!text.empty()) text += " / ";
+					text += r.line->Text.get();
+				}
+				merged->Text = text;
+				line = merged.get();
 			}
-			if (text.size() > 512)
-				text = text.Left(512) + "...";
 
 			wxColour base = !any_overlap ? text_faded : in_sel ? text_selection : text_standard;
-			wxString number = std::to_wstring(refs.front().number);
-			if (refs.size() > 1) number += wxS("+");
-
-			dc.SetTextForeground(base);
-			draw_cell(number, 0, y);
-			dc.SetTextForeground(start != (int)main_line->Start ? text_diff : base);
-			draw_cell(to_wx(agi::Time(start).GetAssFormatted()), 1, y);
-			dc.SetTextForeground(end != (int)main_line->End ? text_diff : base);
-			draw_cell(to_wx(agi::Time(end).GetAssFormatted()), 2, y);
-			dc.SetTextForeground(base);
-			dc.SetClippingRegion(col_x[3], y, w - col_x[3], line_height);
-			draw_cell(text, 3, y);
-			dc.DestroyClippingRegion();
+			int x = 0;
+			for (size_t j = 0; j < columns.size(); ++j) {
+				if (columns[j]->Width()) {
+					bool differs = (j == COL_START && line->Start != main_line->Start)
+						|| (j == COL_END && line->End != main_line->End);
+					dc.SetTextForeground(differs ? text_diff : base);
+					columns[j]->Paint(dc, x, y, line, c);
+				}
+				x += columns[j]->Width();
+			}
 		}
 
 		dc.SetPen(grid_pen);
@@ -355,8 +505,15 @@ void CompareGrid::OnPaint(wxPaintEvent &) {
 
 	const int max_h = (n_draw + 1) * line_height;
 	dc.SetPen(grid_pen);
-	for (int x : col_x)
-		dc.DrawLine(x, 0, x, max_h);
+	{
+		int x = 0;
+		for (auto const& column : columns) {
+			x += column->Width();
+			if (x < w)
+				dc.DrawLine(x, 0, x, max_h);
+		}
+	}
+	dc.DrawLine(0, 0, 0, max_h);
 	dc.DrawLine(w - 1, 0, w - 1, max_h);
 
 	if (active_line && active_line->Row >= y_pos && active_line->Row < y_pos + n_draw) {
@@ -380,17 +537,7 @@ void CompareGrid::OnMouse(wxMouseEvent &evt) {
 		return;
 	}
 
-	if (maps_dirty) UpdateMaps();
-	int row = evt.GetY() / line_height + y_pos - 1;
-	if (evt.GetY() < line_height || row < 0 || row >= (int)rows.size())
-		return;
-
-	// Clicking a row selects the main line it is aligned with, so that the
-	// grid scroll position is preserved
-	AssDialogue *line = rows[row];
-	c->selectionController->SetSelectionAndActive({line}, line);
-	grid->ScrollTo(y_pos);
-
-	if (evt.LeftDClick() && !row_refs[row].empty())
-		c->videoController->JumpToTime(row_refs[row].front().line->Start);
+	// Clicking switches to editing this file, with the clicked line active
+	int row = evt.GetY() < line_height ? -1 : evt.GetY() / line_height + y_pos - 1;
+	Activate(row);
 }

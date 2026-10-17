@@ -18,6 +18,7 @@
 #include <libaegisub/signal.h>
 
 #include <boost/container/list.hpp>
+#include <memory>
 #include <wx/timer.h>
 
 class SelectionController;
@@ -27,6 +28,7 @@ namespace agi {
 	}
 	struct Context;
 }
+class AssFile;
 struct AssFileCommit;
 struct ProjectProperties;
 
@@ -40,6 +42,12 @@ class SubsController : private agi::signal::ConnectionScope {
 	struct UndoInfo;
 	boost::container::list<UndoInfo> undo_stack;
 	boost::container::list<UndoInfo> redo_stack;
+
+	/// A second open file which isn't currently being edited. It is shown in
+	/// the comparison pane and can be swapped with the active file at any time,
+	/// keeping its own undo history and modified state.
+	struct Document;
+	std::unique_ptr<Document> secondary;
 
 	/// Revision counter for undo coalescing and modified state tracking
 	int commit_id = 0;
@@ -62,6 +70,9 @@ class SubsController : private agi::signal::ConnectionScope {
 	agi::signal::Signal<agi::fs::path> FileOpen;
 	/// The file has been saved
 	agi::signal::Signal<> FileSave;
+	/// The secondary file was opened, closed or swapped with the active file
+	/// (the argument is true for a swap)
+	agi::signal::Signal<bool> SecondaryChanged;
 
 	/// The filename of the currently open file, if any
 	agi::fs::path filename;
@@ -124,6 +135,25 @@ public:
 
 	DEFINE_SIGNAL_ADDERS(FileOpen, AddFileOpenListener)
 	DEFINE_SIGNAL_ADDERS(FileSave, AddFileSaveListener)
+	DEFINE_SIGNAL_ADDERS(SecondaryChanged, AddSecondaryChangedListener)
+
+	/// Open a file as the secondary file, replacing any existing one
+	/// @param file File name
+	/// @param charset Character set of file
+	void LoadSecondary(agi::fs::path const& file, const char *charset);
+	/// Discard the secondary file without asking about unsaved changes
+	void CloseSecondary();
+	/// Make the secondary file the active one and vice versa
+	void SwapSecondary();
+	/// If the secondary file has unsaved changes, ask the user whether to save them
+	/// @return wxYES, wxNO or wxCANCEL
+	int TryToCloseSecondary(bool allow_cancel = true);
+
+	bool HasSecondary() const { return !!secondary; }
+	/// The secondary file's contents, or nullptr if there isn't one
+	const AssFile *SecondaryFile() const;
+	agi::fs::path SecondaryFilename() const;
+	bool IsSecondaryModified() const;
 
 	/// @brief Undo the last set of changes to the file
 	void Undo();

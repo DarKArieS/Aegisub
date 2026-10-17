@@ -155,11 +155,21 @@ void BaseGrid::OnShowColMenu(wxCommandEvent &event) {
 
 	columns_visible.resize(columns.size(), true);
 	columns_visible[item] = new_value;
-	OPT_SET("Subtitle/Grid/Column")->SetListBool(columns_visible);
+	OPT_SET(column_option)->SetListBool(columns_visible);
 	columns[item]->SetVisible(new_value);
 
 	SetColumnWidths();
 
+	Refresh(false);
+}
+
+void BaseGrid::SetColumnOption(std::string const& option_name) {
+	if (option_name == column_option) return;
+	column_option = option_name;
+	columns_visible = OPT_GET(column_option)->GetListBool();
+	for (size_t i : agi::util::range(columns.size()))
+		columns[i]->SetVisible(i >= columns_visible.size() || columns_visible[i]);
+	SetColumnWidths();
 	Refresh(false);
 }
 

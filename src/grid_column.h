@@ -23,6 +23,7 @@
 #include <wx/string.h>
 
 class AssDialogue;
+class AssFile;
 class wxDC;
 namespace agi { struct Context; }
 
@@ -55,7 +56,7 @@ protected:
 	int width = 0;
 	bool visible = true;
 
-	virtual int Width(const agi::Context *c, WidthHelper &helper) const = 0;
+	virtual int Width(const agi::Context *c, AssFile const& file, WidthHelper &helper) const = 0;
 	virtual wxString Value(const AssDialogue *d, const agi::Context *c) const = 0;
 
 public:
@@ -73,6 +74,8 @@ public:
 	bool Visible() const { return visible; }
 
 	virtual void UpdateWidth(const agi::Context *c, WidthHelper &helper);
+	/// Update the width for displaying the lines of a file other than c->ass
+	void UpdateWidth(const agi::Context *c, AssFile const& file, WidthHelper &helper);
 	virtual void SetByFrame(bool /* by_frame */) { }
 	void SetVisible(bool new_value) { visible = new_value; }
 };

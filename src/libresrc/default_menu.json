@@ -16,6 +16,7 @@
         {},
         { "command" : "time/continuous/start", "text" : "&Make times continuous (change start)" },
         { "command" : "time/continuous/end", "text" : "&Make times continuous (change end)" },
+        { "command" : "subtitle/compare/sync_time" },
         { "command" : "edit/line/recombine" },
         {},
         { "command" : "subtitle/whisper/transcribe" },
@@ -71,7 +72,8 @@
         { "command" : "time/snap/scene" },
         { "command" : "time/frame/current" },
         {},
-        { "submenu" : "main/timing/make times continuous", "text" : "Make Times Continuous" }
+        { "submenu" : "main/timing/make times continuous", "text" : "Make Times Continuous" },
+        { "command" : "subtitle/compare/sync_time" }
     ],
     "main/timing/make times continuous" : [
         { "command" : "time/continuous/start" },

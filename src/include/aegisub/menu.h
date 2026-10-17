@@ -34,6 +34,7 @@ ID allocation for menu items:
 ... - wxID_ANY(-1), wxID_LOWEST(4999) - wxID_HIGHEST(5999)    Reserved by wxWidgets, see documentation for wxID_HIGHEST
 
 (wxID_HIGHEST + 1) + 2000 ~ (wxID_HIGHEST + 1) + 2014    Grid column list, see base_grid.cpp
+(wxID_HIGHEST + 1) + 2100 ~ (wxID_HIGHEST + 1) + 2114    Comparison grid column list, see compare_grid.cpp
 (wxID_HIGHEST + 1) + 3000 ~ (wxID_HIGHEST + 1) + 3001    Context menu, see timeedit_ctrl.cpp
 (wxID_HIGHEST + 1) + 4000 ~ (wxID_HIGHEST + 1) + 7999    Context menu, see subs_edit_ctrl.cpp
 (wxID_HIGHEST + 1) + 8000 ~ (wxID_HIGHEST + 1) + 8019    Grid context menu, see base_grid.cpp

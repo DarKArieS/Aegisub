@@ -17,6 +17,7 @@
         { "command" : "subtitle/open/video" },
         { "command" : "subtitle/open/autosave" },
         { "command" : "subtitle/compare/open" },
+        { "command" : "subtitle/compare/swap" },
         { "command" : "subtitle/compare/close" },
         { "command" : "subtitle/save" },
         { "command" : "subtitle/save/as" },

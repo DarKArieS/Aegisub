@@ -37,6 +37,7 @@
 #include "../compat.h"
 #include "../dialog_search_replace.h"
 #include "../dialogs.h"
+#include "../format.h"
 #include "../frame_main.h"
 #include "../include/aegisub/context.h"
 #include "../libresrc/libresrc.h"
@@ -307,6 +308,50 @@ struct subtitle_compare_close final : public Command {
 	}
 };
 
+struct subtitle_compare_swap final : public Command {
+	CMD_NAME("subtitle/compare/swap")
+	STR_MENU("S&witch to Comparison Subtitles")
+	STR_DISP("Switch to Comparison Subtitles")
+	STR_HELP("Edit the comparison subtitles, showing the current file as the comparison instead")
+	CMD_TYPE(COMMAND_VALIDATE)
+
+	void operator()(agi::Context *c) override {
+		c->compareGrid->Swap();
+	}
+
+	bool Validate(const agi::Context *c) override {
+		return c->compareGrid && c->compareGrid->IsLoaded();
+	}
+};
+
+struct subtitle_compare_sync_time final : public Command {
+	CMD_NAME("subtitle/compare/sync_time")
+	STR_MENU("Sync &Timing from Comparison")
+	STR_DISP("Sync Timing from Comparison")
+	STR_HELP("Set the times of the selected lines to the times of the lines matched to them in the comparison subtitles")
+	CMD_TYPE(COMMAND_VALIDATE)
+
+	void operator()(agi::Context *c) override {
+		int changed = 0;
+		for (auto line : c->selectionController->GetSelectedSet()) {
+			int start, end;
+			if (!c->compareGrid->GetMatchedTimes(line, start, end)) continue;
+			if (start == line->Start && end == line->End) continue;
+			line->Start = start;
+			line->End = end;
+			++changed;
+		}
+
+		if (changed)
+			c->ass->Commit(_("sync timing from comparison"), AssFile::COMMIT_DIAG_TIME);
+		c->frame->StatusTimeout(fmt_plural(changed, "Synced timing of %d line", "Synced timing of %d lines", changed));
+	}
+
+	bool Validate(const agi::Context *c) override {
+		return c->compareGrid && c->compareGrid->IsLoaded() && !c->selectionController->GetSelectedSet().empty();
+	}
+};
+
 struct subtitle_open_autosave final : public Command {
 	CMD_NAME("subtitle/open/autosave")
 	STR_MENU("Open A&utosaved Subtitles...")
@@ -492,6 +537,8 @@ namespace cmd {
 		reg(std::make_unique<subtitle_close>());
 		reg(std::make_unique<subtitle_compare_close>());
 		reg(std::make_unique<subtitle_compare_open>());
+		reg(std::make_unique<subtitle_compare_swap>());
+		reg(std::make_unique<subtitle_compare_sync_time>());
 		reg(std::make_unique<subtitle_open>());
 		reg(std::make_unique<subtitle_open_autosave>());
 		reg(std::make_unique<subtitle_open_charset>());

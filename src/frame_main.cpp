@@ -120,6 +120,7 @@ FrameMain::FrameMain()
 	BindConnection(context->ass->AddCommitListener(&FrameMain::UpdateTitle, this));
 	BindConnection(context->subsController->AddFileOpenListener(&FrameMain::OnSubtitlesOpen, this));
 	BindConnection(context->subsController->AddFileSaveListener(&FrameMain::UpdateTitle, this));
+	BindConnection(context->subsController->AddSecondaryChangedListener(&FrameMain::UpdateTitle, this));
 	BindConnection(context->project->AddAudioProviderListener(&FrameMain::OnAudioOpen, this));
 	BindConnection(context->project->AddVideoProviderListener(&FrameMain::OnVideoOpen, this));
 
@@ -263,6 +264,11 @@ void FrameMain::UpdateTitle() {
 	wxString newTitle;
 	if (context->subsController->IsModified()) newTitle << "* ";
 	newTitle << context->subsController->Filename().filename().wstring();
+	if (context->subsController->HasSecondary()) {
+		newTitle << " | ";
+		if (context->subsController->IsSecondaryModified()) newTitle << "* ";
+		newTitle << context->subsController->SecondaryFilename().filename().wstring();
+	}
 
 #ifndef __WXMAC__
 	newTitle << " - Aegisub " << GetAegisubLongVersionString();
@@ -327,7 +333,8 @@ void FrameMain::OnCloseWindow(wxCloseEvent &event) {
 	context->audioController->Stop();
 
 	// Ask user if he wants to save first
-	if (context->subsController->TryToClose(event.CanVeto()) == wxCANCEL) {
+	if (context->subsController->TryToClose(event.CanVeto()) == wxCANCEL ||
+		context->subsController->TryToCloseSecondary(event.CanVeto()) == wxCANCEL) {
 		event.Veto();
 		return;
 	}
